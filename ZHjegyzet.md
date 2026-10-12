@@ -91,7 +91,7 @@ FROM tábla_név
 WHERE 1 = 0;
 ```
 
- 1. Idempotens adatfeltöltés MERGE utasítással: (remélem 😅)
+ 2. Idempotens adatfeltöltés MERGE utasítással: (remélem 😅)
 
 ```sql
 MERGE INTO tábla_név_másolat target
@@ -102,3 +102,49 @@ INSERT (azonosító, megszólitás, dátum)
 VALUES (source.azonosító, source.megszólitás, source.dátum);
 COMMIT;
 ```
+
+### Válogatás új táblákba mező érték alapján (itten pölö dátum szerint)
+
+1. Először isletrehozunk 2 táblát amibe nincs semmi, de rendelkeznek mindennel, ami kell, hogy az eredeti táblából áttuggyuk bele baszni a megfelelően válogatott sorokat!
+
+```sql
+CREATE TABLE regi_tábla_név AS
+SELECT * FROM tábla_név WHERE 1 = 0;
+
+CREATE TABLE új_tábla_név AS
+SELECT * FROM tábla_név WHERE 1 = 0;
+```
+
+2. Most kéne válogatni valahogy...
+
+```sql
+INSERT FIRST
+    WHEN dátum < ADD_MONTHS(SYSDATE, -6) THEN
+        INTO regi_tábla_név (azonosító, megszólitás, dátum)
+        VALUES (azonosító, megszólitás, dátum)
+    ELSE
+        INTO új_tábla_név (azonosító, megszólitás, dátum)
+        VALUES (azonosító, megszólitás, dátum)
+SELECT azonosító, megszólitás, dátum
+FROM tábla_név;
+
+COMMIT;
+```
+
+3. Ellenőrizni is érdemes:
+
+```sql
+SELECT 'Régi kölkök' AS kazonosító, megszólitás, dátum FROM regi_tábla_név
+UNION ALL
+SELECT 'Új kölkök' AS azonosító, megszólitás, dátum FROM új_tábla_név;
+```
+
+Kicsitt késő tisztázni, de a tábla_név-ben gyerekek szerepelnek a példák szerint, a másik_tábla_név-ben pedig meg hozzájuk rendelt játékok vannak (gyerek:játék = 1:N)
+
+## View-ok
+
+### Csoportosító view
+
+Hogy hívják azt az állóvizet amelyik legjobban összehozza az  embereket: Csoportosí-tó!
+
+![ROLF COPTER](https://commons.wikimedia.org/wiki/File:Roflcopter.gif#/media/File:Roflcopter.gif)
