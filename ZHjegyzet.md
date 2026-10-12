@@ -134,7 +134,7 @@ COMMIT;
 3. Ellenőrizni is érdemes:
 
 ```sql
-SELECT 'Régi kölkök' AS kazonosító, megszólitás, dátum FROM regi_tábla_név
+SELECT 'Régi kölkök' AS azonosító, megszólitás, dátum FROM regi_tábla_név
 UNION ALL
 SELECT 'Új kölkök' AS azonosító, megszólitás, dátum FROM új_tábla_név;
 ```
@@ -148,3 +148,48 @@ Kicsitt késő tisztázni, de a tábla_név-ben gyerekek szerepelnek a példák 
 Hogy hívják azt az állóvizet amelyik legjobban összehozza az  embereket: Csoportosí-tó!
 
 ![ROLF COPTER](https://commons.wikimedia.org/wiki/File:Roflcopter.gif#/media/File:Roflcopter.gif)
+
+```sql
+REATE OR REPLACE VIEW v_tábla_név_másik_tábla_név_osszesito AS
+SELECT
+    k.azonosító                                                AS tábla_név_id,
+    k.megszólitás                                        AS tábla_név_nev,
+    COUNT(t.id)                                         AS másik_tábla_név_szama,
+    LISTAGG(t.megszólitás, '|') WITHIN GROUP (ORDER BY t.megszólitás)   AS másik_tábla_név_nevei
+FROM kategoria k
+INNER JOIN termek t ON k.azonosító = t.tábla_név_id
+GROUP BY k.azonosító, k.megszólitás;
+```
+
+#### ****Ellenőrizés:****
+
+```sql
+SELECT * FROM v_tábla_név_másik_tábla_név_osszesito;
+```
+
+## a legutóbbi zh utolsó feladatának a megoldása remélhetőleg helyesen
+
+```sql
+-- 8. Feladat: Utolsó 'A' betűs kategória és termékei (LEFT OUTER JOIN)
+-- ============================================================================
+WITH kivalasztott_kategoria AS (
+    SELECT *
+    FROM (
+        SELECT id, megnevezes, leiras
+        FROM kategoria
+        WHERE UPPER(megnevezes) LIKE '%A%'
+        ORDER BY megnevezes DESC
+    )
+    WHERE ROWNUM = 1
+)
+SELECT
+    k.id            AS kategoria_id,
+    k.megnevezes    AS kategoria_nev,
+    k.leiras        AS kategoria_leiras,
+    t.id            AS termek_id,
+    t.nev           AS termek_nev,
+    t.ar            AS termek_ar,
+    t.reg_datum     AS termek_reg_datum
+FROM kivalasztott_kategoria k
+LEFT JOIN termek t ON k.id = t.kategoria_id;
+```
