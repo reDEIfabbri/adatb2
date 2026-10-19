@@ -129,7 +129,7 @@ SELECT * FROM dual;
 COMMIT;
 ```
 
-> ☠️ **DÁTUMCSAPDA a ZH-n: "Aktuális dátum óra, perc és másodperc nélkül!"**
+> **DÁTUMCSAPDA a ZH-n: "Aktuális dátum óra, perc és másodperc nélkül!"**
 > Ha simán beírod, hogy `SYSDATE`, abban másodpercre pontosan benne lesz a mostani idő (pl. `2026-10-19 21:15:32`).
 > A ZH feladatok kifejezetten kérik: *óra, perc és másodperc nélkül*!
 > Ilyenkor **KÖTELEZŐ a `TRUNC`**:
