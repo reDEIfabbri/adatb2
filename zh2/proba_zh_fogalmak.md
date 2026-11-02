@@ -1,50 +1,369 @@
-# Adatbázis és PL/SQL Fogalomtár – Próba ZH (ZH2)
+# Adatbázis és PL/SQL Teljes Fogalomtár – ZH2 Felkészítő
 
-Ez a dokumentum a [`proba_zh.pdf`](file:///home/ikolym/gits/adatb2/zh2/proba_zh.pdf) feladatsorában előforduló összes adatbázis- és PL/SQL fogalmat, azok pontos definícióját és a gyakorlatban leggyakrabban használt mintakódjait foglalja össze Oracle XE / PL/SQL Developer környezetre adaptálva.
+Ez a tudástár a [`zh2_felkeszito.md`](file:///home/ikolym/gits/adatb2/zh2/zh2_felkeszito.md), a [`proba_zh.pdf`](file:///home/ikolym/gits/adatb2/zh2/proba_zh.pdf) és az órai gyakorlati anyagok alapján rendszerezi az Adatbázisok 2 második zárthelyi dolgozatához szükséges összes adatbázis- és PL/SQL fogalmat. Minden fogalomhoz tartozik egy tömör definíció, a leggyakoribb szintaxis és egy gyakorlati példakód.
 
 ---
 
-## 1. Adatbázis jogosultságok (Database Privileges / `GRANT`)
+## 1. Architektúra és Blokkszerkezet
 
-- **Definíció:** Az adatbázis-kezelőben a felhasználók (sémák) számára engedélyezett műveletek köre (pl. DDL utasítások futtatása objektumok létrehozására). Típusok (`OBJECT TYPE`) létrehozásához külön rendszerszintű jogosultság (`CREATE TYPE`) szükséges, amelyet emelt szintű (pl. SYSDBA) felhasználó adhat ki.
-- **Leggyakoribb példa (SYS felhasználóval futtatva):**
+### 1.1 Névtelen blokk (Anonymous Block)
+- **Definíció:** Olyan lefordítás nélkül azonnal futtatott PL/SQL kódblokk, amely nem tárolódik az adatbázis katalógusában. Három fő szekcióból áll: deklarációs (`DECLARE`), végrehajtható (`BEGIN`) és kivételkezelő (`EXCEPTION`).
+- **Példa:**
   ```sql
-  GRANT CREATE TYPE TO termek_nyilvantarto;
-  GRANT CREATE PROCEDURE TO termek_nyilvantarto;
-  GRANT CREATE TABLE TO termek_nyilvantarto;
-  GRANT CREATE SESSION TO termek_nyilvantarto;
+  DECLARE
+    v_szam NUMBER := 10;
+  BEGIN
+    DBMS_OUTPUT.PUT_LINE('Érték: ' || v_szam);
+  EXCEPTION
+    WHEN OTHERS THEN
+      DBMS_OUTPUT.PUT_LINE('Hiba lépett fel!');
+  END;
+  /
   ```
 
+### 1.2 Utasítás-elválasztó perjel (`/`)
+- **Definíció:** Az Oracle SQL*Plus és PL/SQL Developer eszközök számára jelzi a bufferben lévő PL/SQL blokk vagy DDL utasítás lezárását és végrehajtását.
+- **Szabály:** Mindig új sor elején, önmagában álljon a blokk lezáró `END;` sora után.
+
 ---
 
-## 2. Objektum típus (Object Type / `CREATE TYPE ... AS OBJECT`)
+## 2. Változók és Attribútumtípusok
 
-- **Definíció:** Felhasználó által definiált összetett adattípus (Composite Data Type / UDT), amely több logikailag összetartozó attribútumot (és opcionálisan metódusokat) fog össze egyetlen egységbe. SQL táblák oszloptípusaként, valamint PL/SQL változóként és visszatérési értékként is használható.
-- **Leggyakoribb példa:**
+### 2.1 Skalár típusok és Konstansok
+- **Definíció:** Egyetlen diszkrét értéket tároló adattípusok (`VARCHAR2`, `NUMBER`, `DATE`, `BOOLEAN`). A `CONSTANT` kulcsszóval deklarált változók értéke nem módosítható a blokk futása során.
+- **Példa:**
   ```sql
-  CREATE OR REPLACE TYPE ty_termek_type AS OBJECT (
-    termek_id   NUMBER,
-    megnevezes  VARCHAR2(250)
-  );
+  v_szoveg VARCHAR2(100) := 'Kezdőérték';
+  v_ar     NUMBER(10,2)  := 1500.50;
+  v_datum  DATE          := SYSDATE;
+  b_aktiv  BOOLEAN       := TRUE; -- csak PL/SQL-ben létezik, SQL táblában nem!
+  c_ado    CONSTANT NUMBER := 0.27;
+  ```
+
+### 2.2 `%TYPE` – Oszlop típusának átvétele
+- **Definíció:** Dinamikus típus-hozzárendelés. A változó típusát és hosszát közvetlenül egy létező táblaoszlopból (vagy másik változóból) örökli, így sémaváltozás esetén a kód automatikusan adaptálódik.
+- **Példa:**
+  ```sql
+  v_megnevezes termek.megnevezes%TYPE;
+  v_ar         bolt_termek.egysegar%TYPE;
+  ```
+
+### 2.3 `%ROWTYPE` – Teljes sor típusának átvétele
+- **Definíció:** Olyan rekordtípus, amely egy adatbázistábla, nézet vagy explicit kurzor teljes oszlopszerkezetét egyetlen összetett változóként képezi le.
+- **Példa:**
+  ```sql
+  DECLARE
+    v_bolt bolt%ROWTYPE;
+  BEGIN
+    SELECT * INTO v_bolt FROM bolt WHERE id = 12300;
+    DBMS_OUTPUT.PUT_LINE(v_bolt.nev || ' (' || v_bolt.cim || ')');
+  END;
   /
   ```
 
 ---
 
-## 3. Konstruktor függvény (Constructor Function)
+## 3. Vezérlési Szerkezetek és Feltételes Elágazások
 
-- **Definíció:** Az objektum típusok példányosítására és inicializálására szolgáló speciális függvény. Alapértelmezés szerint az Oracle minden attribútumot azonos sorrendben váró konstruktort hoz létre, de definiálható egyedi (pl. paraméter nélküli vagy részleges) konstruktor is `CONSTRUCTOR FUNCTION ... RETURN SELF AS RESULT` szignatúrával.
-- **Leggyakoribb példa:**
+### 3.1 `IF-THEN-ELSIF-ELSE`
+- **Definíció:** Feltételes elágazáskezelés. Ha az `IF` vagy `ELSIF` feltétel igazra (`TRUE`) értékelődik, a hozzá tartozó utasítások futnak le; egyéb esetben az `ELSE` ág fut le.
+- **Példa:**
   ```sql
-  -- Típus specifikációban:
+  IF v_count = 0 THEN
+    RETURN 'Nincs termek!';
+  ELSIF v_count = 1 THEN
+    RETURN v_egy_termek;
+  ELSE
+    RETURN v_lista;
+  END IF;
+  ```
+
+### 3.2 Simple CASE és Searched CASE
+- **Definíció:**
+  - **Simple CASE:** Egyetlen kifejezés pontos egyenlőségét vizsgálja adott értékekkel szemben.
+  - **Searched CASE:** Tetszőleges független logikai feltételeket értékel ki fentről lefelé.
+- **Példa (Searched CASE):**
+  ```sql
+  CASE
+    WHEN v_keszlet = 0 THEN
+      DBMS_OUTPUT.PUT_LINE('ELFOGYOTT');
+    WHEN v_keszlet < 50 THEN
+      DBMS_OUTPUT.PUT_LINE('UTÁNTÖLTÉS SZÜKSÉGES');
+    ELSE
+      DBMS_OUTPUT.PUT_LINE('ELEGENDŐ KÉSZLET');
+  END CASE;
+  ```
+
+---
+
+## 4. Ciklusok (Loops)
+
+### 4.1 Alap LOOP (`EXIT WHEN`)
+- **Definíció:** Végtelen ciklus, amelyből a feltételhez kötött `EXIT WHEN` utasítással lépünk ki.
+- **Példa:**
+  ```sql
+  LOOP
+    v_idx := v_idx + 1;
+    EXIT WHEN v_idx > 5;
+  END LOOP;
+  ```
+
+### 4.2 WHILE LOOP
+- **Definíció:** Elöltesztelő ciklus; addig ismétlődik, amíg a fejlécben szereplő feltétel `TRUE`.
+- **Példa:**
+  ```sql
+  WHILE v_idx IS NOT NULL LOOP
+    DBMS_OUTPUT.PUT_LINE(v_idx || ' -> ' || v_map(v_idx));
+    v_idx := v_map.NEXT(v_idx);
+  END LOOP;
+  ```
+
+### 4.3 FOR LOOP és REVERSE FOR LOOP
+- **Definíció:** Számlálós ciklus előre meghatározott intervallumra (`alsó_érték .. felső_érték`). A ciklusváltozót a PL/SQL automatikusan deklarálja. A `REVERSE` kulcsszóval felülről lefelé számol.
+- **Példa:**
+  ```sql
+  FOR i IN 1..5 LOOP
+    DBMS_OUTPUT.PUT_LINE('Növekvő: ' || i);
+  END LOOP;
+
+  FOR i IN REVERSE 1..5 LOOP
+    DBMS_OUTPUT.PUT_LINE('Csökkenő: ' || i);
+  END LOOP;
+  ```
+
+---
+
+## 5. Kurzorok és Attribútumaik
+
+### 5.1 Implicit kurzor (`SELECT ... INTO`)
+- **Definíció:** Olyan beágyazott SQL lekérdezés, amelynek eredményét közvetlenül PL/SQL változókba töltjük be.
+- **Szabály:** Pontosan **egy** sort kell visszaadnia. Ha 0 sort ad → `NO_DATA_FOUND`, ha 2 vagy több sort → `TOO_MANY_ROWS` kivétel keletkezik.
+- **Példa:**
+  ```sql
+  SELECT megnevezes INTO v_nev FROM termek WHERE id = 9000;
+  ```
+
+### 5.2 Explicit kurzor (`OPEN`, `FETCH`, `CLOSE`)
+- **Definíció:** Névvel ellátott SQL lekérdezés, amelynek sorait a fejlesztő explicit lépésekkel nyitja meg, olvassa be és zárja le.
+- **Példa:**
+  ```sql
+  DECLARE
+    CURSOR cur_boltok IS SELECT nev, cim FROM bolt ORDER BY nev;
+    v_rec cur_boltok%ROWTYPE;
+  BEGIN
+    OPEN cur_boltok;
+    LOOP
+      FETCH cur_boltok INTO v_rec;
+      EXIT WHEN cur_boltok%NOTFOUND;
+      DBMS_OUTPUT.PUT_LINE(v_rec.nev);
+    END LOOP;
+    CLOSE cur_boltok;
+  END;
+  /
+  ```
+
+### 5.3 Kurzor FOR LOOP (deklarált és inline)
+- **Definíció:** A legbiztonságosabb és legtisztább kurzorbejárási forma. Az Oracle automatikusan megnyitja, soronként kiolvassa és a végén lezárja a kurzort.
+- **Példa (Inline kurzor):**
+  ```sql
+  FOR rec IN (SELECT nev, cim FROM bolt ORDER BY nev) LOOP
+    DBMS_OUTPUT.PUT_LINE(rec.nev || ' - ' || rec.cim);
+  END LOOP;
+  ```
+
+### 5.4 Paraméteres kurzor
+- **Definíció:** Olyan kurzor, amely bemeneti argumentumokat fogad a `WHERE` feltétel dinamikus szűréséhez.
+- **Példa:**
+  ```sql
+  CURSOR cur_termekek(p_bolt_id NUMBER) IS
+    SELECT t.megnevezes, bt.egysegar
+      FROM bolt_termek bt
+      JOIN termek t ON t.id = bt.termek_id
+     WHERE bt.bolt_id = p_bolt_id;
+  ```
+
+### 5.5 Kurzor attribútumok
+- **Explicit kurzorokhoz (`cur%`):**
+  - `%FOUND`: Az utolsó `FETCH` sikeresen olvasott-e be sort (`BOOLEAN`).
+  - `%NOTFOUND`: Az utolsó `FETCH` nem talált több sort (`BOOLEAN`).
+  - `%ROWCOUNT`: Az eddig beolvasott sorok darabszáma (`NUMBER`).
+  - `%ISOPEN`: A kurzor nyitva van-e éppen (`BOOLEAN`).
+- **Implicit SQL műveletekhez (`SQL%`):**
+  - `SQL%FOUND`: Az utolsó `UPDATE`, `DELETE` vagy `INSERT` érintett-e legalább egy sort.
+  - `SQL%ROWCOUNT`: A legutóbbi DML utasítás által érintett sorok száma.
+
+---
+
+## 6. Kivételkezelés (Exception Handling)
+
+### 6.1 Beépített kivételek
+- **Definíció:** Előre definiált Oracle hibák elkapása a blokk `EXCEPTION` ágában.
+- **Legfontosabb kivételek:**
+  - `NO_DATA_FOUND`: Egy `SELECT ... INTO` lekérdezés 0 sort adott vissza.
+  - `TOO_MANY_ROWS`: Egy `SELECT ... INTO` 1-nél több sort adott vissza.
+  - `DUP_VAL_ON_INDEX`: `UNIQUE` vagy `PRIMARY KEY` megszorítás megsértése beszúráskor/módosításkor.
+  - `ZERO_DIVIDE`: Nullával való osztási kísérlet.
+  - `VALUE_ERROR`: Méret- vagy típuskonverziós hiba (pl. túl hosszú szöveg).
+  - `OTHERS`: Minden egyéb nem nevesített kivétel elkapása (`SQLERRM`-mel naplózható).
+- **Példa:**
+  ```sql
+  EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+      DBMS_OUTPUT.PUT_LINE('Nincs adat!');
+    WHEN TOO_MANY_ROWS THEN
+      DBMS_OUTPUT.PUT_LINE('Túl sok sor!');
+    WHEN DUP_VAL_ON_INDEX THEN
+      DBMS_OUTPUT.PUT_LINE('Már létező kulcsérték!');
+    WHEN OTHERS THEN
+      DBMS_OUTPUT.PUT_LINE('Váratlan hiba: ' || SQLERRM);
+  END;
+  ```
+
+### 6.2 Aggregációs csapda (Aggregation Trap)
+- **Definíció:** A `COUNT(*)`, `MAX()`, `MIN()`, `SUM()`, `AVG()` aggregáló függvények **mindig pontosan 1 sort adnak vissza** (ha nincs egyezés, akkor 0-t vagy `NULL`-t). Emiatt rájuk a `NO_DATA_FOUND` kivétel **soha nem váltódik ki**!
+- **Kezelés:** Ha a feladat kifejezetten kéri a hibakezelést, az `EXCEPTION` ágat formálisan meg kell írni, vagy `COUNT` / `IF v_ertek IS NULL` logikával kell lekezelni.
+
+---
+
+## 7. Konzolos Kommunikáció (`DBMS_OUTPUT`)
+
+### 7.1 Metódusok és Karakterek
+- **Definíció:** A PL/SQL szerveroldali kimeneti puffere.
+  - `DBMS_OUTPUT.PUT_LINE(str)`: Kiírja a szöveget és sortörést szúr be.
+  - `DBMS_OUTPUT.PUT(str)`: Kiírja a szöveget sortörés nélkül.
+  - `DBMS_OUTPUT.NEW_LINE`: Új sort kezd.
+  - `chr(10)`: Line feed (LF) karakter; szövegek közé fűzhető sortörésként (`|| chr(10) ||`).
+- **Példa:**
+  ```sql
+  DBMS_OUTPUT.PUT_LINE('Név: ' || v_nev || chr(10) || 'Ár: ' || v_ar);
+  ```
+
+---
+
+## 8. Tárolt Eljárások és Függvények
+
+### 8.1 Tárolt Eljárás (`CREATE PROCEDURE`)
+- **Definíció:** Önállóan tárolt alprogram, amely műveleteket végez. Nincs közvetlen `RETURN` visszatérési típusa.
+- **Paraméter módok:**
+  - `IN`: Csak olvasható bemeneti paraméter (alapértelmezett).
+  - `OUT`: Csak írható kimeneti paraméter (eredmény visszaadására hívónak).
+  - `IN OUT`: Olvasható és írható paraméter.
+- **Példa:**
+  ```sql
+  CREATE OR REPLACE PROCEDURE modosit_keszlet(
+    p_bt_id     IN  NUMBER,
+    p_mennyiseg IN  NUMBER,
+    p_uj_ertek  OUT NUMBER
+  ) IS
+  BEGIN
+    UPDATE bolt_termek
+       SET keszlet = keszlet + p_mennyiseg
+     WHERE id = p_bt_id
+    RETURNING keszlet INTO p_uj_ertek;
+  END modosit_keszlet;
+  /
+  ```
+
+### 8.2 Nevesített paraméterátadás (Named Notation)
+- **Definíció:** Az eljárások paramétereinek nevesített átadása `=>` operátorral, tetszőleges sorrendben.
+- **Példa:**
+  ```sql
+  modosit_keszlet(p_mennyiseg => 10, p_bt_id => 10000, p_uj_ertek => v_keszlet);
+  ```
+
+### 8.3 Lokális (beágyazott) eljárás
+- **Definíció:** Egy eljárás vagy függvény deklarációs részében definiált belső segédeljárás, amely csak a szülő alprogramon belül hívható meg.
+- **Példa:**
+  ```sql
+  CREATE OR REPLACE PROCEDURE print_riport IS
+    PROCEDURE vonal IS
+    BEGIN
+      DBMS_OUTPUT.PUT_LINE('-----------------------------');
+    END;
+  BEGIN
+    vonal;
+    DBMS_OUTPUT.PUT_LINE('Jelentés fejléc');
+    vonal;
+  END;
+  /
+  ```
+
+### 8.4 Tárolt Függvény (`CREATE FUNCTION`)
+- **Definíció:** Olyan alprogram, amely bemenő paraméterek alapján számítást végez, és kötelezően rendelkezik visszatérési értékkel (`RETURN típus`). SQL `SELECT`-ben is használható, ha nem hajt végre DML-t.
+- **Példa:**
+  ```sql
+  CREATE OR REPLACE FUNCTION get_keszlet_ertek(p_bt_id IN NUMBER)
+    RETURN NUMBER
+  IS
+    v_ertek NUMBER;
+  BEGIN
+    SELECT egysegar * keszlet INTO v_ertek FROM bolt_termek WHERE id = p_bt_id;
+    RETURN v_ertek;
+  EXCEPTION
+    WHEN NO_DATA_FOUND THEN RETURN -1;
+    WHEN TOO_MANY_ROWS THEN RETURN -2;
+  END get_keszlet_ertek;
+  /
+  ```
+
+---
+
+## 9. Csomagok (Packages)
+
+### 9.1 Fejléc (Specification)
+- **Definíció:** A csomag publikus felülete. Tartalmazza a kívülről elérhető függvények, eljárások szignatúráit és globális változóit.
+- **Példa:**
+  ```sql
+  CREATE OR REPLACE PACKAGE pkg_raktar AS
+    gv_alap_keszlet NUMBER;
+    FUNCTION get_keszlet_ertek(p_bt_id IN NUMBER) RETURN NUMBER;
+    PROCEDURE ar_kalkulacio(p_bt_id IN NUMBER);
+  END pkg_raktar;
+  /
+  ```
+
+### 9.2 Törzs (Body)
+- **Definíció:** A csomag megvalósítása. Itt szerepel az összes fejlécben deklarált alprogram teljes kódja, valamint a csomagon belüli privát változók és privát alprogramok.
+
+### 9.3 Csomagszintű állapot és Inicializációs blokk
+- **Definíció:**
+  - A csomagszintű változók munkamenet-szintűek (`session-level`): a kapcsolat bezárásáig megőrzik az értéküket.
+  - Az inicializációs blokk a csomagtörzs végén lévő `BEGIN ... END pkg;` szakasz, amely pontosan **egyszer** fut le automatikusan, amikor a munkamenet először hivatkozik a csomagra.
+- **Példa:**
+  ```sql
+  CREATE OR REPLACE PACKAGE BODY pkg_raktar AS
+    gv_privat_szamlalo NUMBER := 0; -- privát változó
+
+    FUNCTION get_keszlet_ertek(p_bt_id IN NUMBER) RETURN NUMBER IS ... END;
+    PROCEDURE ar_kalkulacio(p_bt_id IN NUMBER) IS ... END;
+
+  BEGIN
+    -- Inicializációs blokk:
+    gv_alap_keszlet := 100;
+  END pkg_raktar;
+  /
+  ```
+
+---
+
+## 10. Objektum Típusok (Object Types)
+
+### 10.1 `CREATE TYPE ... AS OBJECT`
+- **Definíció:** Kompozit felhasználói típus definiálása attribútumokkal.
+- **Példa:**
+  ```sql
   CREATE OR REPLACE TYPE ty_termek_type AS OBJECT (
-    termek_id   NUMBER,
-    megnevezes  VARCHAR2(250),
+    termek_id  NUMBER,
+    megnevezes VARCHAR2(250),
     CONSTRUCTOR FUNCTION ty_termek_type RETURN SELF AS RESULT
   );
   /
+  ```
 
-  -- Típus törzsben (TYPE BODY):
+### 10.2 Felülírt és Paraméter nélküli konstruktor
+- **Definíció:** Lehetővé teszi az objektum inicializálását argumentumok megadása nélkül (`NULL` attribútumokkal).
+- **Példa:**
+  ```sql
   CREATE OR REPLACE TYPE BODY ty_termek_type AS
     CONSTRUCTOR FUNCTION ty_termek_type RETURN SELF AS RESULT IS
     BEGIN
@@ -56,252 +375,196 @@ Ez a dokumentum a [`proba_zh.pdf`](file:///home/ikolym/gits/adatb2/zh2/proba_zh.
   /
   ```
 
+### 10.3 Konstruktor túlterhelés (Overloading)
+- **Definíció:** Egy típushoz több különböző paraméterezésű konstruktor is készíthető (pl. csak ID-t váró, vagy minden mezőt inicializáló).
+
 ---
 
-## 4. Tárolt függvény (Stored Function / `CREATE FUNCTION`)
+## 11. Kollekciók (Collections)
 
-- **Definíció:** Névvel ellátott, előrefordított PL/SQL programegység, amely bemeneti paramétereket fogad, műveleteket végez, és **mindig pontosan egy visszatérési értékkel** (`RETURN`) tér vissza. SQL lekérdezésekből (`SELECT`) is meghívható, amennyiben nem hajt végre tiltott adatbázis-módosítást (DML).
-- **Leggyakoribb példa:**
+### 11.1 Nested Table (Beágyazott tábla)
+- **Definíció:** Olyan méretezhető egydimenziós tömb, amely sémaszinten (`CREATE TYPE ... IS TABLE OF`) is létrehozható, így SQL lekérdezésekben és táblaoszlopként is szerepelhet.
+- **Példa:**
   ```sql
-  CREATE OR REPLACE FUNCTION get_termek_adatok(p_id IN NUMBER)
-    RETURN ty_termek_type
-  IS
-    v_id   NUMBER;
-    v_nev  VARCHAR2(250);
-  BEGIN
-    SELECT id, megnevezes
-      INTO v_id, v_nev
-      FROM termek
-     WHERE id = p_id;
-
-    RETURN ty_termek_type(v_id, v_nev);
-  EXCEPTION
-    WHEN NO_DATA_FOUND THEN
-      RETURN ty_termek_type(); -- paraméter nélküli konstruktor
-    WHEN TOO_MANY_ROWS THEN
-      RETURN NULL;
-  END get_termek_adatok;
+  CREATE OR REPLACE TYPE ty_termek_list IS TABLE OF ty_termek_type;
   /
   ```
 
----
-
-## 5. Kivételkezelés (Exception Handling)
-
-- **Definíció:** Futásidejű hibák (runtime errors) elkapására és kezelésére szolgáló vezérlési szerkezet (`EXCEPTION` blokk). Megakadályozza a program váratlan leállását, és lehetővé teszi egyedi hibakódok, alapértelmezett értékek vagy naplóüzenetek visszaadását.
-- **A feladatsor kulcskivételei:**
-  - `NO_DATA_FOUND`: A `SELECT ... INTO` lekérdezés egyetlen rekordot sem talált.
-  - `TOO_MANY_ROWS`: A `SELECT ... INTO` egynél több rekordot talált.
-- **Leggyakoribb példa:**
+### 11.2 Asszociatív tömb (Associative Array / `INDEX BY`)
+- **Definíció:** Kulcs-érték párokat tároló hash-tábla. Csak PL/SQL blokkokban használható. A kulcs lehet `PLS_INTEGER` vagy `VARCHAR2`.
+- **Iterálás:** Mivel a kulcsok ritkák (sparse) lehetnek, iterálni mindig `.FIRST` és `.NEXT()` metódusokkal kell!
+- **Példa:**
   ```sql
+  DECLARE
+    TYPE t_termek_map IS TABLE OF VARCHAR2(250) INDEX BY PLS_INTEGER;
+    v_map t_termek_map;
+    v_idx PLS_INTEGER;
   BEGIN
-    SELECT egysegar, keszlet
-      INTO v_egysegar, v_keszlet
-      FROM bolt_termek
-     WHERE id = p_bt_id;
+    v_map(10) := 'Tej';
+    v_map(20) := 'Kenyér';
 
-    RETURN v_egysegar * v_keszlet;
-  EXCEPTION
-    WHEN NO_DATA_FOUND THEN
-      RETURN -1;
-    WHEN TOO_MANY_ROWS THEN
-      RETURN -2;
+    v_idx := v_map.FIRST;
+    WHILE v_idx IS NOT NULL LOOP
+      DBMS_OUTPUT.PUT_LINE(v_idx || ' -> ' || v_map(v_idx));
+      v_idx := v_map.NEXT(v_idx);
+    END LOOP;
   END;
+  /
+  ```
+
+### 11.3 Kollekció metódusok
+| Metódus | Leírás |
+| :--- | :--- |
+| `.COUNT` | Elemek aktuális száma |
+| `.EXTEND` | Új üres elem hozzáadása a végéhez (Nested Table/Varray) |
+| `.EXISTS(i)` | Igaz, ha létezik elem az adott `i` indexen |
+| `.FIRST / .LAST` | Első és utolsó index lekérdezése |
+| `.PRIOR(i) / .NEXT(i)` | Előző és következő érvényes index lekérdezése |
+| `.DELETE / .DELETE(i)` | Teljes kollekció vagy adott indexű elem törlése |
+
+### 11.4 `MULTISET UNION ALL`
+- **Definíció:** Két Nested Table kollekció tartalmi összefűzésére szolgáló beépített operátor.
+- **Példa:**
+  ```sql
+  v_eredmeny := v_lista1 MULTISET UNION ALL v_lista2;
   ```
 
 ---
 
-## 6. Csoportosító szöveg-összefűzés (`LISTAGG`)
+## 12. Tömeges Műveletek (`BULK COLLECT`)
 
-- **Definíció:** Beépített Oracle SQL aggregáló függvény, amely több sor adott szöveges oszlopának értékeit összefűzi egyetlen sztringgé egy megadott határolójel mentén, meghatározott rendezés (`WITHIN GROUP (ORDER BY ...)`) szerint.
-- **Leggyakoribb példa:**
+### 12.1 `BULK COLLECT INTO`
+- **Definíció:** Kontextusváltás-csökkentő mechanizmus. A lekérdezés teljes eredményhalmazát egyetlen lépésben betölti a memóriában lévő kollekcióba (Nested Table vagy asszociatív tömb).
+- **Példa:**
   ```sql
-  SELECT LISTAGG(t.megnevezes, ',') WITHIN GROUP (ORDER BY t.megnevezes)
-    INTO v_result
+  DECLARE
+    TYPE t_nevek IS TABLE OF termek.megnevezes%TYPE;
+    v_nevek t_nevek;
+  BEGIN
+    SELECT megnevezes BULK COLLECT INTO v_nevek FROM termek ORDER BY megnevezes;
+    FOR i IN 1..v_nevek.COUNT LOOP
+      DBMS_OUTPUT.PUT_LINE(v_nevek(i));
+    END LOOP;
+  END;
+  /
+  ```
+
+### 12.2 `FETCH ... BULK COLLECT INTO ... LIMIT`
+- **Definíció:** Nagy adatmennyiségek szakaszos (kötegelt) feldolgozása a memóriatúlcsordulás megelőzésére.
+- **Példa:**
+  ```sql
+  OPEN cur;
+  LOOP
+    FETCH cur BULK COLLECT INTO v_batch LIMIT 100;
+    EXIT WHEN v_batch.COUNT = 0;
+    -- feldolgozás...
+  END LOOP;
+  CLOSE cur;
+  ```
+
+---
+
+## 13. Szövegműveletek és Eredményhalmaz-összefűzés
+
+### 13.1 `LISTAGG`
+- **Definíció:** Eredménysorok oszlopértékeit összefűző aggregáló függvény `WITHIN GROUP (ORDER BY ...)` klauzulával.
+- **Példa:**
+  ```sql
+  SELECT LISTAGG(t.megnevezes, ', ') WITHIN GROUP (ORDER BY t.megnevezes)
+    INTO v_termek_lista
     FROM bolt_termek bt
     JOIN termek t ON t.id = bt.termek_id
-   WHERE bt.bolt_id = p_bolt_id;
+   WHERE bt.bolt_id = 12300;
   ```
 
 ---
 
-## 7. Csomag (Package / Fejléc és Törzs)
+## 14. Szekvenciák (Sequences)
 
-- **Definíció:** Logikailag összefüggő eljárások, függvények, típusok, kurzorok és változók egységbe zárása (moduláris programozás).
-  1. **Fejléc (`PACKAGE`):** A publikus interfész; csak a kívülről hívható elemek deklarációját tartalmazza.
-  2. **Törzs (`PACKAGE BODY`):** Az implementáció, valamint a privát segédfüggvények, eljárások és változók.
-- **Leggyakoribb példa:**
+### 14.1 `CREATE SEQUENCE`, `.NEXTVAL`, `.CURRVAL`
+- **Definíció:** Adatbázisszintű sorszámgenerátor kulcsértékek (`ID`) előállítására.
+- **Példa:**
   ```sql
-  -- Fejléc:
-  CREATE OR REPLACE PACKAGE pkg_raktar AS
-    gv_alap_keszlet NUMBER;
+  CREATE SEQUENCE seq_bolt_termek_id START WITH 20000 INCREMENT BY 1 NOCACHE;
 
-    FUNCTION  get_keszlet_ertek(p_bt_id IN NUMBER) RETURN NUMBER;
-    PROCEDURE ar_kalkulacio(p_bt_id IN NUMBER);
-    PROCEDURE print_termek_boltok(p_termek_id IN NUMBER);
-  END pkg_raktar;
-  /
+  -- Használat INSERT-ben:
+  INSERT INTO bolt_termek(id, bolt_id, termek_id, egysegar, keszlet)
+  VALUES (seq_bolt_termek_id.NEXTVAL, 12300, 9000, 350, 100);
 
-  -- Törzs:
-  CREATE OR REPLACE PACKAGE BODY pkg_raktar AS
-    FUNCTION get_keszlet_ertek(p_bt_id IN NUMBER) RETURN NUMBER IS
-      v_keszlet NUMBER;
-      v_ar      NUMBER;
-    BEGIN
-      SELECT keszlet, egysegar INTO v_keszlet, v_ar FROM bolt_termek WHERE id = p_bt_id;
-      RETURN v_keszlet * v_ar;
-    EXCEPTION
-      WHEN NO_DATA_FOUND THEN RETURN -1;
-      WHEN TOO_MANY_ROWS THEN RETURN -2;
-    END get_keszlet_ertek;
-
-    PROCEDURE ar_kalkulacio(p_bt_id IN NUMBER) IS
-    BEGIN
-      NULL; -- implementáció
-    END ar_kalkulacio;
-
-    PROCEDURE print_termek_boltok(p_termek_id IN NUMBER) IS
-    BEGIN
-      NULL; -- implementáció
-    END print_termek_boltok;
-  END pkg_raktar;
-  /
+  -- Generált érték lekérdezése:
+  v_id := seq_bolt_termek_id.CURRVAL;
   ```
 
 ---
 
-## 8. Csomagszintű változó és Inicializációs blokk (Package Variable & Initialization)
+## 15. Dinamikus SQL (`EXECUTE IMMEDIATE`)
 
+### 15.1 Futásidejű SQL és DDL futtatása
+- **Definíció:** Futásidőben összefűzött SQL vagy DDL szövegek végrehajtása.
+- **Szabály:** DML esetén bind változókat használunk (`:1`, `USING`), DDL esetén (pl. `CREATE TABLE`) nem lehet bind változót használni.
+- **Példa:**
+  ```sql
+  -- DML lekérdezés bind változóval:
+  EXECUTE IMMEDIATE 'SELECT megnevezes FROM termek WHERE id = :1'
+     INTO v_nev
+    USING 9000;
+
+  -- DDL futtatása dinamikusan:
+  EXECUTE IMMEDIATE 'CREATE TABLE temp_adatok (id NUMBER)';
+  ```
+
+---
+
+## 16. Gyakori Beépített Függvények PL/SQL-ben
+
+### 16.1 String és NULL kezelés
+- `SUBSTR(s, start, len)`: Részsztring kinyerése.
+- `INSTR(s, ker)`: Karakterlánc pozíciójának megkeresése.
+- `LENGTH(s)`: Hosszúság lekérdezése.
+- `TRIM(s)`: Vezető és záró szóközök levágása.
+- `NVL(kif, potas)`: Ha `kif` NULL, a pótló értéket adja vissza.
+- `NVL2(kif, ha_nem_null, ha_null)`: Háromparaméteres elágazás NULL-ra.
+- `COALESCE(a, b, c)`: Az első nem-NULL értéket adja vissza.
+
+### 16.2 Konverziók és Dátumkezelés
+- `TO_CHAR(d, 'YYYY.MM.DD HH24:MI:SS')`: Dátum formázott szöveggé alakítása.
+- `TO_DATE('2024.01.15', 'YYYY.MM.DD')`: Szöveg dátummá konvertálása.
+- `TO_NUMBER('1234')`: Szöveg számmá konvertálása.
+- `ROUND(szam, tizedes)`: Kerekítés adott tizedesjegyre.
+- `MOD(a, b)`: Maradékos osztás.
+- `SYSDATE`: Aktuális szerveroldali dátum és időpont.
+
+---
+
+## 17. Tranzakciókezelés és Jogosultságok
+
+### 17.1 Tranzakciók (`COMMIT`, `ROLLBACK`, `SAVEPOINT`)
 - **Definíció:**
-  - **Csomagszintű változó:** A csomag fejlécében deklarált globális változó, amelynek értéke a munkamenet (session) ideje alatt mindvégig perzisztens marad.
-  - **Inicializációs blokk:** A csomagtörzs végén elhelyezett `BEGIN ... END;` blokk, amely pontosan egyszer hajtódik végre automatikusan, amikor a munkamenet legelőször hivatkozik a csomagra.
-- **Leggyakoribb példa:**
-  ```sql
-  CREATE OR REPLACE PACKAGE BODY pkg_raktar AS
-    -- eljárások és függvények...
+  - `COMMIT`: A tranzakció során végzett DML műveletek véglegesítése.
+  - `ROLLBACK`: A tranzakció visszavonása az utolsó commitig.
+  - `SAVEPOINT pont_nev`: Részleges mentési pont létrehozása (`ROLLBACK TO pont_nev`).
+- **Fontos:** Bármely DDL utasítás (pl. `CREATE`, `ALTER`, `DROP`, `GRANT`) **automatikus implicit COMMIT-ot** hajt végre előtte és utána is!
 
-  -- Inicializációs blokk a törzs legvégén:
-  BEGIN
-    gv_alap_keszlet := 100;
-  END pkg_raktar;
-  /
-  ```
+### 17.2 Jogosultságok (`GRANT`)
+- `GRANT CREATE TYPE TO felhasználó`: Szükséges saját objektumtípusok definiálásához.
+- `GRANT CREATE PROCEDURE TO felhasználó`: Szükséges tárolt eljárások, függvények és csomagok létrehozásához.
 
 ---
 
-## 9. Tárolt eljárás (Stored Procedure / `CREATE PROCEDURE`)
+## 18. Gyors Áttekintő Táblázat a ZH-ra
 
-- **Definíció:** Önmagában lefordított és tárolt PL/SQL programegység, amely műveleteket hajt végre (pl. DML frissítést, naplózást, kiíratást). Nincs közvetlen `RETURN` értéke (bár `OUT` vagy `IN OUT` paraméterekkel adatot tud visszaadni).
-- **Leggyakoribb példa:**
-  ```sql
-  CREATE OR REPLACE PROCEDURE ar_kalkulacio(p_bt_id IN NUMBER) IS
-    v_keszlet NUMBER;
-  BEGIN
-    SELECT keszlet INTO v_keszlet FROM bolt_termek WHERE id = p_bt_id;
-
-    IF v_keszlet < pkg_raktar.gv_alap_keszlet THEN
-      UPDATE bolt_termek
-         SET egysegar = egysegar * 1.1
-       WHERE id = p_bt_id;
-    END IF;
-  EXCEPTION
-    WHEN NO_DATA_FOUND THEN
-      DBMS_OUTPUT.PUT_LINE('Hiba: nincs adat a megadott azonositoval.');
-    WHEN TOO_MANY_ROWS THEN
-      DBMS_OUTPUT.PUT_LINE('Hiba: tul sok talalt.');
-  END ar_kalkulacio;
-  /
-  ```
-
----
-
-## 10. Kurzor (Cursor / Cursor FOR LOOP)
-
-- **Definíció:** Lekérdezések több sorból álló eredményhalmazának soronkénti bejárására és feldolgozására szolgáló adatbázis mutató. A `FOR rec IN cur LOOP` forma automatikusan megnyitja a kurzort (`OPEN`), egyenként beolvassa a sorokat (`FETCH`), majd a ciklus végén le is zárja azt (`CLOSE`).
-- **Leggyakoribb példa:**
-  ```sql
-  PROCEDURE print_termek_boltok(p_termek_id IN NUMBER) IS
-    v_nev VARCHAR2(250);
-
-    CURSOR cur_boltok IS
-      SELECT b.nev
-        FROM bolt_termek bt
-        JOIN bolt b ON b.id = bt.bolt_id
-       WHERE bt.termek_id = p_termek_id;
-  BEGIN
-    SELECT megnevezes INTO v_nev FROM termek WHERE id = p_termek_id;
-    DBMS_OUTPUT.PUT_LINE('Termek neve: ' || v_nev);
-
-    FOR rec IN cur_boltok LOOP
-      DBMS_OUTPUT.PUT_LINE('Bolt: ' || rec.nev);
-    END LOOP;
-  EXCEPTION
-    WHEN NO_DATA_FOUND THEN
-      DBMS_OUTPUT.PUT_LINE('Hiba: nem talalhato termek.');
-  END print_termek_boltok;
-  ```
-
----
-
-## 11. Konzol kimenet (`DBMS_OUTPUT.PUT_LINE`)
-
-- **Definíció:** Az Oracle beépített rendszercsomagja, amely a PL/SQL kód futása közben szöveges sorokat ír a standard kimeneti pufferbe. A fejlesztői eszközök (pl. PL/SQL Developer Output füle, SQL*Plus `SERVEROUTPUT ON` mellett) ezt jelenítik meg a felhasználónak.
-- **Leggyakoribb példa:**
-  ```sql
-  DBMS_OUTPUT.PUT_LINE('Termek neve: ' || v_nev);
-  DBMS_OUTPUT.PUT_LINE('Hiba: nem talalhato termek.');
-  ```
-
----
-
-## 12. Feltételes vezérlés (Conditional Logic / `IF-THEN-ELSIF-ELSE`)
-
-- **Definíció:** Logikai feltételektől függő ágválasztás a PL/SQL logikában (pl. rekordok darabszámának vizsgálata 0, 1 és 1-nél több elem esetén).
-- **Leggyakoribb példa:**
-  ```sql
-  IF v_count = 0 THEN
-    RETURN 'Nincs termek!';
-  ELSIF v_count = 1 THEN
-    SELECT megnevezes INTO v_egy_nev FROM termek WHERE id = p_id;
-    RETURN v_egy_nev;
-  ELSE
-    SELECT LISTAGG(megnevezes, ',') WITHIN GROUP (ORDER BY megnevezes)
-      INTO v_lista
-      FROM termek;
-    RETURN v_lista;
-  END IF;
-  ```
-
----
-
-## 13. DML adatmódosítás PL/SQL-ben (`UPDATE`)
-
-- **Definíció:** Táblában létező sorok adatainak módosítása tranzakció keretében. PL/SQL-ben közvetlenül használható SQL utasítás.
-- **Leggyakoribb példa:**
-  ```sql
-  UPDATE bolt_termek
-     SET egysegar = egysegar * 1.1
-   WHERE id = p_bt_id;
-  ```
-
----
-
-## Fogalmak összefoglaló táblázata
-
-| Fogalom | Kulcsszó / Szintaxis | Fő funkció |
+| Téma | Szintaxis Kulcsszavak | Tipikus Feladat / Felhasználás |
 | :--- | :--- | :--- |
-| **Jogosultság** | `GRANT CREATE TYPE TO ...` | Sémának engedélyezi objektumok létrehozását |
-| **Objektum típus** | `CREATE TYPE ... AS OBJECT` | Összetett attribútum-struktúra definiálása |
-| **Konstruktor** | `CONSTRUCTOR FUNCTION ... RETURN SELF AS RESULT` | Típus inicializálása (pl. üres példány) |
-| **Függvény** | `CREATE FUNCTION ... RETURN ...` | Értéket számító és visszaadó alprogram |
-| **Kivételkezelés** | `EXCEPTION WHEN ... THEN` | Futási hibák (`NO_DATA_FOUND`, stb.) elkapása |
-| **Összefűzés** | `LISTAGG(...) WITHIN GROUP (...)` | Csoportosított értékek szöveges összefűzése |
-| **Csomag fejléc** | `CREATE PACKAGE ... AS` | Publikus interfész definíciója |
-| **Csomag törzs** | `CREATE PACKAGE BODY ... AS` | Implementáció és belső logika megvalósítása |
-| **Csomag változó** | `gv_valtozo NUMBER;` | Session szinten megmaradó állapot |
-| **Csomag inicializáció** | `BEGIN gv_val := 100; END pkg;` | Első hivatkozáskor egyszer lefutó kód |
-| **Eljárás** | `CREATE PROCEDURE ...` | Tevékenységet, adatmódosítást végző alprogram |
-| **Kurzor** | `CURSOR cur IS ... / FOR r IN cur LOOP` | Lekérdezések több sorának feldolgozása |
-| **Konzol kimenet** | `DBMS_OUTPUT.PUT_LINE(...)` | Hiba- és tájékoztató üzenetek kiírása |
-| **Feltételes vezérlés** | `IF ... ELSIF ... ELSE ... END IF;` | Logikai feltételek szerinti elágazás |
-
+| **Object Type** | `CREATE TYPE ty_x AS OBJECT (...)` | Rekord-struktúra definiálása |
+| **Constructor** | `CONSTRUCTOR FUNCTION ty_x RETURN SELF AS RESULT` | Paraméter nélküli/üres objektum példányosítása |
+| **Függvény** | `CREATE FUNCTION fn RETURN ty_x IS ...` | Lekérdezés, adatok visszaadása típussal |
+| **Összefűzés** | `LISTAGG(nev, ',') WITHIN GROUP (ORDER BY nev)` | Eredménysorok rendezett vesszős összefűzése |
+| **Kivételkezelés** | `WHEN NO_DATA_FOUND THEN ... WHEN TOO_MANY_ROWS` | Nem létező rekord vagy több találat lekezelése |
+| **Csomag Fejléc** | `CREATE PACKAGE pkg AS gv_var NUMBER; ... END;` | Publikus interfész és csomagváltozó |
+| **Csomag Törzs** | `CREATE PACKAGE BODY pkg AS ... BEGIN init; END;` | Implementáció és induló inicializálás |
+| **Eljárás** | `CREATE PROCEDURE prc(p_id NUMBER) IS ...` | Ármódosítás, készletkezelés, kiíratás |
+| **Kurzor FOR LOOP** | `FOR rec IN cur LOOP ... END LOOP;` | Több soros eredmény bejárása és kiírása |
+| **Asszociatív Tömb** | `TABLE OF ... INDEX BY PLS_INTEGER;` | Memóriabeli kulcs-érték tároló |
+| **BULK COLLECT** | `SELECT ... BULK COLLECT INTO kollekció` | Tömeges sorbeolvasás memóriába |
+| **DML Modosítás** | `UPDATE tabla SET oszlop = ... WHERE ...;` | Rekordok módosítása (pl. áremelés) |
+| **Kimenet** | `DBMS_OUTPUT.PUT_LINE('szöveg' \|\| var);` | Eredmények kiíratása konzolra |
