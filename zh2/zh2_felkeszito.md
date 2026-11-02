@@ -1373,6 +1373,331 @@ END akcios_arak;
 
 ---
 
+## Órai anyagból: További fontos minták
+
+Az alábbi minták az órai `class_work/` fájlokból származnak, és a ZH-n is előfordulhatnak.
+
+---
+
+### Több konstruktor egy típusban
+
+```plsql
+CREATE OR REPLACE TYPE ty_termek_type AS OBJECT (
+  termek_id   NUMBER,
+  megnevezes  VARCHAR2(250),
+
+  -- Paraméter nélküli konstruktor
+  CONSTRUCTOR FUNCTION ty_termek_type RETURN SELF AS RESULT,
+  -- Egyparaméteres konstruktor (csak ID-vel, alapértelmezett névvel)
+  CONSTRUCTOR FUNCTION ty_termek_type(p_termek_id NUMBER) RETURN SELF AS RESULT
+);
+/
+
+CREATE OR REPLACE TYPE BODY ty_termek_type IS
+
+  CONSTRUCTOR FUNCTION ty_termek_type RETURN SELF AS RESULT IS
+  BEGIN
+    RETURN;  -- attribútumok NULL-ok maradnak
+  END;
+
+  CONSTRUCTOR FUNCTION ty_termek_type(p_termek_id NUMBER) RETURN SELF AS RESULT IS
+  BEGIN
+    SELF.termek_id  := p_termek_id;
+    SELF.megnevezes := 'ismeretlen';
+    RETURN;
+  END;
+
+END;
+/
+```
+
+> **Megjegyzés**: Az üres konstruktorban elég a `RETURN;` – az attribútumok automatikusan NULL-ok. A `SELF.attr := NULL;` sorok opcionálisak.
+
+---
+
+### MULTISET UNION ALL – Nested Table-ök összefűzése
+
+```plsql
+DECLARE
+  v_list1  ty_termek_list;
+  v_list2  ty_termek_list;
+  v_result ty_termek_list;
+BEGIN
+  SELECT ty_termek_type(id, megnevezes)
+    BULK COLLECT INTO v_list1
+    FROM termek WHERE id < 9002;
+
+  SELECT ty_termek_type(id, megnevezes)
+    BULK COLLECT INTO v_list2
+    FROM termek WHERE id >= 9002;
+
+  -- Két nested table összefűzése
+  v_result := v_list1 MULTISET UNION ALL v_list2;
+
+  FOR i IN 1..v_result.COUNT LOOP
+    DBMS_OUTPUT.PUT_LINE(v_result(i).termek_id || ': ' || v_result(i).megnevezes);
+  END LOOP;
+END;
+/
+```
+
+> Más MULTISET operátorok: `MULTISET UNION DISTINCT`, `MULTISET INTERSECT`, `MULTISET EXCEPT`.
+
+---
+
+### Lokális (beágyazott) eljárás egy eljáráson belül
+
+```plsql
+CREATE OR REPLACE PROCEDURE print_bolt_info IS
+  CURSOR cur IS SELECT * FROM bolt;
+
+  -- Lokális eljárás: csak a külső eljáráson belül érhető el
+  PROCEDURE print_separator IS
+  BEGIN
+    DBMS_OUTPUT.PUT_LINE('--------------------');
+  END print_separator;
+
+BEGIN
+  FOR rec IN cur LOOP
+    print_separator;
+    DBMS_OUTPUT.PUT_LINE(rec.nev || ' – ' || rec.cim);
+  END LOOP;
+  print_separator;
+END print_bolt_info;
+/
+```
+
+---
+
+### OUT paraméterek eljárásban
+
+```plsql
+CREATE OR REPLACE PROCEDURE bolt_termek_statisztika(
+  p_bolt_id    IN  NUMBER,
+  p_min_ar     OUT NUMBER,
+  p_max_ar     OUT NUMBER,
+  p_atlag_ar   OUT NUMBER
+)
+IS
+BEGIN
+  SELECT MIN(egysegar), MAX(egysegar), AVG(egysegar)
+    INTO p_min_ar, p_max_ar, p_atlag_ar
+    FROM bolt_termek
+   WHERE bolt_id = p_bolt_id;
+END bolt_termek_statisztika;
+/
+```
+
+#### Hívás és OUT paraméterek kiírása
+
+```plsql
+DECLARE
+  v_min NUMBER;
+  v_max NUMBER;
+  v_avg NUMBER;
+BEGIN
+  bolt_termek_statisztika(
+    p_bolt_id  => 12300,   -- nevesített paraméter (named notation)
+    p_min_ar   => v_min,
+    p_max_ar   => v_max,
+    p_atlag_ar => v_avg
+  );
+
+  DBMS_OUTPUT.PUT_LINE('Min: ' || v_min || chr(10) ||
+                       'Max: ' || v_max || chr(10) ||
+                       'Átlag: ' || v_avg);
+END;
+/
+```
+
+> **`chr(10)`** = sortörés karakter, `||` operátorral fűzhető szövegbe.
+
+---
+
+### Csomag privát változóval
+
+```plsql
+CREATE OR REPLACE PACKAGE pkg_szamlalo AS
+  gv_increment NUMBER;                        -- publikus változó
+  FUNCTION next_number RETURN NUMBER;
+END pkg_szamlalo;
+/
+
+CREATE OR REPLACE PACKAGE BODY pkg_szamlalo AS
+  gv_number NUMBER;                           -- privát változó (csak a törzsben!)
+
+  FUNCTION next_number RETURN NUMBER IS
+  BEGIN
+    gv_number := gv_number + gv_increment;
+    RETURN gv_number;
+  END next_number;
+
+BEGIN
+  -- Inicializáció: NULL ellenőrzés
+  IF gv_increment IS NULL THEN
+    DBMS_OUTPUT.PUT_LINE('Inicializalas...');
+    gv_increment := 1;
+  END IF;
+  gv_number := 0;
+END pkg_szamlalo;
+/
+```
+
+#### Használat
+
+```plsql
+BEGIN
+  DBMS_OUTPUT.PUT_LINE(pkg_szamlalo.next_number);  -- 1
+  DBMS_OUTPUT.PUT_LINE(pkg_szamlalo.next_number);  -- 2
+  pkg_szamlalo.gv_increment := 5;
+  DBMS_OUTPUT.PUT_LINE(pkg_szamlalo.next_number);  -- 7
+END;
+/
+```
+
+> A `gv_number` privát: kívülről **nem** elérhető (`pkg_szamlalo.gv_number` hibát dob).
+> A csomagszintű változók élettartama **session szintű**: amíg a session él, megőrzik az értéküket.
+
+---
+
+### Nevesített paraméter átadás (Named Notation)
+
+```plsql
+-- Pozícionális (sorrendben)
+add_vacc_type('E01', 'Teszt oltás');
+
+-- Nevesített (tetszőleges sorrendben)
+add_vacc_type(p_vacc_name => 'Teszt oltás', p_vacc_type_id => 'E01');
+```
+
+> ZH-n mindkettő elfogadott, de a nevesített áttekinthetőbb, különösen OUT paramétereknél.
+
+---
+
+### CASE kifejezés függvényben (simple CASE – az órai `get_last_modification` mintájára)
+
+```plsql
+CREATE OR REPLACE FUNCTION get_statisztika(p_tabla_kod IN NUMBER)
+  RETURN NUMBER
+IS
+  v_eredmeny NUMBER;
+BEGIN
+  CASE p_tabla_kod
+    WHEN 1 THEN
+      SELECT COUNT(*) INTO v_eredmeny FROM bolt;
+    WHEN 2 THEN
+      SELECT COUNT(*) INTO v_eredmeny FROM termek;
+    WHEN 3 THEN
+      SELECT COUNT(*) INTO v_eredmeny FROM bolt_termek;
+    ELSE
+      v_eredmeny := NULL;
+  END CASE;
+
+  RETURN v_eredmeny;
+END get_statisztika;
+/
+```
+
+---
+
+### Searched CASE egy eljárásban
+
+```plsql
+CREATE OR REPLACE PROCEDURE ertekeles(p_bt_id IN NUMBER) IS
+  v_keszlet NUMBER;
+BEGIN
+  SELECT keszlet INTO v_keszlet FROM bolt_termek WHERE id = p_bt_id;
+
+  CASE
+    WHEN v_keszlet = 0 THEN
+      DBMS_OUTPUT.PUT_LINE('ELFOGYOTT');
+    WHEN v_keszlet < 50 THEN
+      DBMS_OUTPUT.PUT_LINE('KEVES - Rendelés szükséges!');
+    WHEN v_keszlet < 100 THEN
+      DBMS_OUTPUT.PUT_LINE('KOZEPES');
+    ELSE
+      DBMS_OUTPUT.PUT_LINE('ELEGENDO');
+  END CASE;
+EXCEPTION
+  WHEN NO_DATA_FOUND THEN
+    DBMS_OUTPUT.PUT_LINE('Nem talalhato.');
+END ertekeles;
+/
+```
+
+---
+
+### Kurzor %ISOPEN ellenőrzés (az órai 06_print_all_dogs mintájára)
+
+```plsql
+DECLARE
+  CURSOR cur IS SELECT nev FROM bolt;
+BEGIN
+  IF cur%ISOPEN THEN
+    DBMS_OUTPUT.PUT_LINE('Nyitva');
+  ELSE
+    DBMS_OUTPUT.PUT_LINE('Zarva');    -- ez fut OPEN előtt
+  END IF;
+
+  OPEN cur;
+
+  IF cur%ISOPEN THEN
+    DBMS_OUTPUT.PUT_LINE('Nyitva');   -- ez fut OPEN után
+  END IF;
+
+  CLOSE cur;
+END;
+/
+```
+
+---
+
+### PL/SQL Developer Test Window formátum
+
+A `.tst` fájlok PL/SQL Developer-ben Test Window-ban futtathatók:
+
+```plsql
+-- Test: pkg_raktar.get_keszlet_ertek
+DECLARE
+  v_result NUMBER;
+BEGIN
+  v_result := pkg_raktar.get_keszlet_ertek(10000);
+  DBMS_OUTPUT.PUT_LINE('Eredmény: ' || v_result);   -- 42000 (350*120)
+
+  v_result := pkg_raktar.get_keszlet_ertek(99999);
+  DBMS_OUTPUT.PUT_LINE('Nem létező: ' || v_result);  -- -1
+END;
+/
+```
+
+```plsql
+-- Test: ar_kalkulacio
+BEGIN
+  pkg_raktar.ar_kalkulacio(10001);  -- keszlet=45 < 100, ár emelkedik
+  ROLLBACK;                          -- visszavonás teszt után!
+END;
+/
+```
+
+---
+
+## Gyakori buktatók és tippek
+
+| # | Buktató | Megoldás |
+|---|---------|---------|
+| 1 | `NO_DATA_FOUND` sosem dobódik `COUNT(*)`, `MAX()`, `AVG()` stb. aggregáló függvényeknél | Ennek ellenére a feladat kérheti a kezelését – írd bele! |
+| 2 | `ROWNUM` az `ORDER BY` előtt értékelődik ki | Használj allekérdezést: `SELECT * FROM (SELECT ... ORDER BY ...) WHERE ROWNUM = 1` |
+| 3 | Kurzor FOR LOOP után `%ROWCOUNT` nem elérhető | Használj saját számlálót (`v_count := v_count + 1`) |
+| 4 | Asszociatív tömb indexei nem folytonosak | Mindig `FIRST`/`NEXT`-tel iterálj, ne `FOR i IN 1..COUNT`-tal |
+| 5 | Nested Table inicializálatlanul NULL | Mindig inicializáld: `v_list ty_x_list := ty_x_list();` |
+| 6 | `EXTEND` kell elemek hozzáadása előtt (nested table) | `v_list.EXTEND; v_list(v_list.COUNT) := elem;` |
+| 7 | BULK COLLECT felülírja a tömb előző tartalmát | Minden BULK COLLECT törli a korábbi elemeket |
+| 8 | `CREATE TYPE` jogosultság hiányzik | `GRANT CREATE TYPE TO séma_nev;` – SYSDBA-ként |
+| 9 | Csomag fejléc módosítása után a törzs INVALID | Újra kell fordítani a törzset is (`CREATE OR REPLACE PACKAGE BODY ...`) |
+| 10 | `VARCHAR2` vs `CHAR` összehasonlítás | `CHAR` paddelve van szóközökkel – használj `TRIM()`-et vagy `VARCHAR2`-t |
+
+---
+
 ## Összefoglaló – ZH-n szükséges minták
 
 | # | Téma | Kulcs szintaxis |
